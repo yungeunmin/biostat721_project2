@@ -1,0 +1,197 @@
+---
+title: "Mattis_Min_Project2"
+author: "Mattis Min"
+date: "2025-11-12"
+output: word_document
+---
+https://github.com/yungeunmin/biostat721_project2
+
+```{r setup, include=FALSE}
+# Project: Air Pollution and Sickle Cell Disease
+# Author: Mattis Min
+# Date: 2025-11-12
+# Purpose: Clean and aggregate daily air pollutant data (CO, PM2.5, O3) from 2018–2020 to create monthly summaries for Durham County, NC, and visualize pollutant trends over time.
+# R Version: 2025.05.1+513
+# Package Versions: tidyverse: 2.0.0, here: 1.0.1, knitr: 1.50, ggplot2: 3.5.2
+
+library(tidyverse)
+library(lubridate)
+library(here)
+library(ggplot2)
+
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+```
+
+
+
+```{r import, echo=FALSE, include=FALSE}
+# Import Data-----------------------------------------------
+# Import File
+AQ_2018_file <- here("AQ_2018.csv")
+AQ_2019_file <- here("AQ_2019.csv")
+AQ_2020_file <- here("AQ_2020.csv")
+
+# Import CSV
+AQ_2018_raw <- read.csv(AQ_2018_file)
+AQ_2019_raw <- read.csv(AQ_2019_file)
+AQ_2020_raw <- read.csv(AQ_2020_file)
+```
+
+```{r clean data, echo = FALSE, include=FALSE}
+# Clean Data Function
+clean_airdata <- function(data) {
+  cleaned_data <- data |>
+    rename( # Rename columns
+      date = Date,
+      CO = Daily.Max.8.hour.CO.Concentration,
+      PM25 = Daily.Mean.PM2.5.Concentration,
+      O3 = Daily.Max.8.hour.Ozone.Concentration
+    ) |>
+    mutate(
+      date =
+        mdy(as.character(date))
+    ) |> # Convert dates
+    group_by(date) |>
+    summarise(
+      across(c(CO, PM25, O3),
+        mean,
+        na.rm = TRUE
+      ), # Average duplicate
+      .groups = "drop"
+    ) |>
+    distinct() |> # Remove duplicates
+    mutate(across(
+      c(CO, PM25, O3),
+      ~ ifelse(. < 0, 0, .) # Replace negative values
+    ))
+  cleaned_data
+}
+
+# Apply Cleaning Function
+AQ_2018 <- clean_airdata(AQ_2018_raw)
+AQ_2019 <- clean_airdata(AQ_2019_raw)
+AQ_2020 <- clean_airdata(AQ_2020_raw)
+```
+
+```{r prepare data for plot 1, echo = FALSE, include=FALSE}
+# Combine your cleaned datasets
+all_air <- bind_rows(
+  AQ_2018 |> mutate(year = 2018),
+  AQ_2019 |> mutate(year = 2019),
+  AQ_2020 |> mutate(year = 2020)
+)
+
+# Add month variable
+all_air <- all_air |>
+  mutate(month = month(date, label = TRUE))
+
+# Prepare data for plotting
+co_o3_monthly <- all_air |>
+  group_by(month) |>
+  summarise(
+    CO_mean = mean(CO, na.rm = TRUE),
+    O3_mean = mean(O3, na.rm = TRUE),
+    CO_sd = sd(CO, na.rm = TRUE),
+    O3_sd = sd(O3, na.rm = TRUE),
+    CO_n = sum(!is.na(CO)),
+    O3_n = sum(!is.na(O3)),
+    .groups = "drop"
+  ) |>
+  mutate(
+    CO_se = CO_sd / sqrt(CO_n),
+    O3_se = O3_sd / sqrt(O3_n),
+    CO_ci = 1.96 * CO_se,
+    O3_ci = 1.96 * O3_se
+  )
+```
+
+```{r plot 1, echo = FALSE, fig.width=7, fig.height=4.3}
+ggplot(
+  co_o3_monthly,
+  aes(x = month)
+) +
+
+  # CO points
+  geom_point(
+    aes(
+      y = CO_mean,
+      color = "CO"
+    ),
+    size = 1.5
+  ) +
+  # CO error bar
+  geom_errorbar(
+    aes(
+      ymin = CO_mean - CO_ci,
+      ymax = CO_mean + CO_ci,
+      color = "CO"
+    ),
+    width = 0.2
+  ) +
+  # O3 points
+  geom_point(
+    aes(
+      y = O3_mean,
+      color = "O3"
+    ),
+    size = 1.5
+  ) +
+  # O3 error bar
+  geom_errorbar(
+    aes(
+      ymin = O3_mean - O3_ci,
+      ymax = O3_mean + O3_ci,
+      color = "O3"
+    ),
+    width = 0.2
+  ) +
+  # colors
+  scale_color_viridis_d(option = "viridis") +
+  labs(
+    title = "Monthly Average CO and O3 Concentrations (2018–2020)",
+    x = "Month",
+    y = "Concentration (ppm)",
+    color = "Pollutant"
+  ) +
+  theme_minimal(base_size = 12.5)
+```
+
+
+```{r prepare data for plot 2, echo = FALSE, include=FALSE}
+pm25_monthly <- all_air |>
+  group_by(year, month) |>
+  summarise(
+    PM25_mean = mean(PM25, na.rm = TRUE),
+    PM25_sd = sd(PM25, na.rm = TRUE),
+    PM25_n = sum(!is.na(PM25)),
+    .groups = "drop"
+  ) |>
+  mutate(
+    PM25_se = PM25_sd / sqrt(PM25_n),
+    PM25_ci = 1.96 * PM25_se
+  )
+```  
+  
+```{r plot 2, echo = FALSE, fig.width=7, fig.height=7}
+ggplot(
+  pm25_monthly,
+  aes(
+    x = month,
+    y = PM25_mean,
+    group = year,
+    color = factor(year)
+  )
+) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  facet_wrap(~year, ncol = 1) +
+  scale_color_viridis_d(option = "viridis") +
+  labs(
+    title = "Monthly Average PM2.5 Concentration (2018-2020)",
+    x = "Month",
+    y = "PM2.5 Concentration (µg/m³)",
+    color = "Year"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "none")
+```
